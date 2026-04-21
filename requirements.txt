@@ -1,0 +1,27 @@
+# numpy>=1.26
+# pandas>=2.2
+# scikit-learn>=1.5
+# PyYAML>=6.0.2
+# neo4j>=5.24
+# python-dotenv>=1.0.1
+# requests
+# gradio>=6.10.0
+# matplotlib>=3.10.8
+# openpyxl>=3.1.5
+# uvicorn
+# fastapi
+
+numpy
+pandas
+scikit-learn
+PyYAML
+neo4j
+python-dotenv
+requests
+gradio
+matplotlib
+openpyxl
+uvicorn
+fastapi
+torch==2.2.0
+transformers==4.40.0

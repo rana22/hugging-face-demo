@@ -1,0 +1,69 @@
+.truncate {
+    max-width: 250px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: help;
+}
+
+.table-wrap {
+    max-height: 520px;
+    overflow: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 0.5rem;
+}
+
+table.sortable-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+}
+
+table.sortable-table th,
+table.sortable-table td {
+    padding: 0.45rem 0.6rem;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+table.sortable-table th {
+    cursor: pointer;
+    user-select: none;
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 1;
+}
+
+.sort-indicator {
+    font-size: 0.8em;
+    opacity: 0.7;
+}
+
+.expandable-cell {
+    max-width: 260px;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+}
+
+.expandable-cell.expanded {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    max-width: 600px;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    padding: 6px;
+    border-radius: 4px;
+    position: relative;
+    z-index: 2;
+}
+
+.expandable-cell.collapsed::after {
+    content: " ⤢";
+    color: #888;
+    font-size: 12px;
+}

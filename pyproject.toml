@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "icdc-data-generator-mvp"
+version = "0.1.0"
+description = "MVP for discovering property relationships in ICDC sample data"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "scikit-learn>=1.5",
+  "PyYAML>=6.0.2",
+  "neo4j>=5.24",
+  "python-dotenv>=1.0.1",
+  "requests",
+  "gradio>=6.10.0",
+  "matplotlib>=3.10.8",
+  "openpyxl>=3.1.5",
+]
+
+[project.scripts]
+icdc-analyze = "cli:main"
+icdc-anlyz = "cli2:main"
+icdc-generate = "generator:main"
+icdc-build-schemas = "schema_builder:main"
+app = "app:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
