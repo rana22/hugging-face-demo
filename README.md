@@ -28,6 +28,7 @@ Each team should have:
    - **Visibility**: Public or Private  
 
 Click **Create Space**
+Create **HUGGIN FACE Acess Key** and add it to .env
 
 ---
 
