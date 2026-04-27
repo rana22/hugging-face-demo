@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -20,9 +20,9 @@ SUBSTRING_WEIGHT_PROFILES = {
     # },
     "human_relevance": {
         "support": 0.10,
-        "prefix_match": 0.02,
-        "suffix_match": 0.02,
-        "substring_match": 0.85,
+        "prefix_match": 0.5,
+        "suffix_match": 0.5,
+        "substring_match": 0.5,
         "doc_alignment": 0.05,
     },
     "sample": {
@@ -43,7 +43,7 @@ SUBSTRING_WEIGHT_PROFILES = {
         "support": 0.10,
         "prefix_match": 0.30,
         "suffix_match": 0.30,
-        "substring_match": 0.25,
+        "substring_match": 0.5,
         "doc_alignment": 0.05,
     },
 }
@@ -75,6 +75,12 @@ def suffix_match_score(df: pd.DataFrame, a: str, b: str) -> float:
             match += 1
     return match / total if total else 0.0
 
+
+def smart_contains(av: str, bv: str) -> bool:
+    tokens = re.split(r'[^a-z0-9]+', av.lower())
+    bv = bv.lower()
+    return any(t and t in bv for t in tokens)
+
 def substring_match_score(df: pd.DataFrame, a: str, b: str) -> float:
     total = 0
     match = 0
@@ -84,7 +90,7 @@ def substring_match_score(df: pd.DataFrame, a: str, b: str) -> float:
         if not av or not bv:
             continue
         total += 1
-        if av in bv:
+        if smart_contains(av, bv):
             match += 1
     return match / total if total else 0.0
 

@@ -342,75 +342,148 @@ class TextualFeatureAnalyzer:
 
         return list(combinations(usable, 2))
 
+    # def analyze(self, df: pd.DataFrame) -> pd.DataFrame:
+    #     if df is None or df.empty:
+    #         return pd.DataFrame()
+
+    #     rows: list[dict[str, Any]] = []
+
+    #     for a, b in self._candidate_pairs(df):
+    #         key = self._cache_key(a, b)
+
+    #         if key in self.cache:
+    #             result = self.cache[key]
+    #         else:
+    #             try:
+    #                 prop_a_values = _sample_property_values(df, a, self.max_value_samples)
+    #                 prop_b_values = _sample_property_values(df, b, self.max_value_samples)
+
+    #                 prompt_messages = build_textual_relation_messages(
+    #                     self.node_schema,
+    #                     a,
+    #                     b,
+    #                     prop_a_values,
+    #                     prop_b_values,
+    #                 )
+
+    #                 result = self.relation_model(prompt_messages)
+
+    #                 if not isinstance(result, dict):
+    #                     raise ValueError("Model did not return a dict")
+
+    #                 self.cache[key] = result
+
+    #             except Exception as e:
+    #                 result = {
+    #                     "label": "error",
+    #                     "reason": f"Model failure: {str(e)}",
+    #                     "raw": "",
+    #                 }
+
+    #         label = (result.get("label") or "unrelated").lower()
+    #         reason = result.get("reason", "")
+    #         raw = result.get("raw", "")
+
+    #         rows.append(
+    #             {
+    #                 "A": a,
+    #                 "B": b,
+    #                 "feature_type": "textual",
+    #                 "label": label,
+    #                 "classification": self.classify_strength(label),
+    #                 "reasoning": reason,
+    #                 "model_raw": raw,
+    #                 "strength": (
+    #                     1.0 if label == "matching"
+    #                     else 0.75 if label == "related"
+    #                     else 0.5 if label == "complementary"
+    #                     else 0.0
+    #                 ),
+    #                 "node_name": getattr(self.node_schema, "name", "") or getattr(self.node_schema, "Name", ""),
+    #                 "node_description": getattr(self.node_schema, "description", "") or getattr(self.node_schema, "Desc", ""),
+    #                 "property_a_text": _extract_property_schema_text(self.node_schema, a),
+    #                 "property_b_text": _extract_property_schema_text(self.node_schema, b),
+    #                 "sample_a": _sample_property_values(df, a, self.max_value_samples),
+    #                 "sample_b": _sample_property_values(df, b, self.max_value_samples),
+    #             }
+    #         )
+
+    #     out = pd.DataFrame(rows)
+
+    #     if not out.empty:
+    #         out = out[out["label"].isin({"matching", "related", "complementary"})].reset_index(drop=True)
+
+    #     return out
+    
     def analyze(self, df: pd.DataFrame) -> pd.DataFrame:
         if df is None or df.empty:
             return pd.DataFrame()
 
         rows: list[dict[str, Any]] = []
 
-        for a, b in self._candidate_pairs(df):
-            key = self._cache_key(a, b)
+        candidate_pairs = self._candidate_pairs(df)
+        if not candidate_pairs:
+            return pd.DataFrame()
 
-            if key in self.cache:
-                result = self.cache[key]
-            else:
-                try:
-                    prop_a_values = _sample_property_values(df, a, self.max_value_samples)
-                    prop_b_values = _sample_property_values(df, b, self.max_value_samples)
+        a, b = candidate_pairs[0]   # only the first pair
 
-                    prompt_messages = build_textual_relation_messages(
-                        self.node_schema,
-                        a,
-                        b,
-                        prop_a_values,
-                        prop_b_values,
-                    )
+        key = self._cache_key(a, b)
 
-                    result = self.relation_model(prompt_messages)
+        if key in self.cache:
+            result = self.cache[key]
+        else:
+            try:
+                prop_a_values = _sample_property_values(df, a, self.max_value_samples)
+                prop_b_values = _sample_property_values(df, b, self.max_value_samples)
 
-                    if not isinstance(result, dict):
-                        raise ValueError("Model did not return a dict")
+                prompt_messages = build_textual_relation_messages(
+                    self.node_schema,
+                    a,
+                    b,
+                    prop_a_values,
+                    prop_b_values,
+                )
 
-                    self.cache[key] = result
+                result = self.relation_model(prompt_messages)
 
-                except Exception as e:
-                    result = {
-                        "label": "error",
-                        "reason": f"Model failure: {str(e)}",
-                        "raw": "",
-                    }
+                if not isinstance(result, dict):
+                    raise ValueError("Model did not return a dict")
 
-            label = (result.get("label") or "unrelated").lower()
-            reason = result.get("reason", "")
-            raw = result.get("raw", "")
+                self.cache[key] = result
 
-            rows.append(
-                {
-                    "A": a,
-                    "B": b,
-                    "feature_type": "textual",
-                    "label": label,
-                    "classification": self.classify_strength(label),
-                    "reasoning": reason,
-                    "model_raw": raw,
-                    "strength": (
-                        1.0 if label == "matching"
-                        else 0.75 if label == "related"
-                        else 0.5 if label == "complementary"
-                        else 0.0
-                    ),
-                    "node_name": getattr(self.node_schema, "name", "") or getattr(self.node_schema, "Name", ""),
-                    "node_description": getattr(self.node_schema, "description", "") or getattr(self.node_schema, "Desc", ""),
-                    "property_a_text": _extract_property_schema_text(self.node_schema, a),
-                    "property_b_text": _extract_property_schema_text(self.node_schema, b),
-                    "sample_a": _sample_property_values(df, a, self.max_value_samples),
-                    "sample_b": _sample_property_values(df, b, self.max_value_samples),
+            except Exception as e:
+                result = {
+                    "label": "error",
+                    "reason": f"Model failure: {str(e)}",
+                    "raw": "",
                 }
-            )
 
-        out = pd.DataFrame(rows)
+        label = (result.get("label") or "unrelated").lower()
+        reason = result.get("reason", "")
+        raw = result.get("raw", "")
 
-        if not out.empty:
-            out = out[out["label"].isin({"matching", "related", "complementary"})].reset_index(drop=True)
+        rows.append(
+            {
+                "A": a,
+                "B": b,
+                "feature_type": "textual",
+                "label": label,
+                "classification": self.classify_strength(label),
+                "reasoning": reason,
+                "model_raw": raw,
+                "strength": (
+                    1.0 if label == "matching"
+                    else 0.75 if label == "related"
+                    else 0.5 if label == "complementary"
+                    else 0.0
+                ),
+                "node_name": getattr(self.node_schema, "name", "") or getattr(self.node_schema, "Name", ""),
+                "node_description": getattr(self.node_schema, "description", "") or getattr(self.node_schema, "Desc", ""),
+                "property_a_text": _extract_property_schema_text(self.node_schema, a),
+                "property_b_text": _extract_property_schema_text(self.node_schema, b),
+                "sample_a": _sample_property_values(df, a, self.max_value_samples),
+                "sample_b": _sample_property_values(df, b, self.max_value_samples),
+            }
+        )
 
-        return out
+        return pd.DataFrame(rows)

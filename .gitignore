@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual env
+venv/
+.env
+.env.*
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Temporary / generated outputs
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Data files (optional - if large or sensitive)
+*.csv
+*.json
+*.xlsx
+
+# Model/cache (important for your case)
+.cache/
+*.pt
+*.bin
+*.onnx
+
+# HuggingFace / transformers cache
+~/.cache/huggingface/
+.cache/huggingface/
+
+# Gradio / uploads
+gradio/
+uploads/
+
+# Output artifacts
+*.html
+*.png
+*.jpg
+*.jpeg
+
+# Neo4j / local DB files (if any)
+*.db
+*.sqlite
+
+__pycache__/
+*.pyc
+/.venv
+
+**/__pycache__
+/feature/__pycache__
+*.pyc

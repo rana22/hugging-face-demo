@@ -21,8 +21,6 @@ from reporting import write_markdown_report
 from schema import load_node_schema, PropertySchema, load_schemas_from_models, node_schemas_to_markdown
 from viz import generate_visual_report
 from evaluator2 import PairwiseRelationshipEvaluator
-from feature.model_wrapper import relation_model_wrapper
-from feature.textual import TextualFeatureAnalyzer
 
 BASE_DIR = Path(__file__).resolve().parent
 TABLE_JS = (BASE_DIR / "static" / "table.js").read_text(encoding="utf-8")
@@ -725,64 +723,10 @@ def _build_sortable_table(df: pd.DataFrame, table_id: str, title: str) -> str:
     </div>
     """
 
-def _build_textual_status_md(node_name: str, results: pd.DataFrame) -> str:
-    lines = [f"# Textual analysis for `{node_name}`"]
-    lines.append(f"- Pairs analyzed: `{len(results)}`")
-
-    if results is not None and not results.empty and "label" in results.columns:
-        counts = results["label"].fillna("unknown").value_counts().to_dict()
-        lines.append("\n## Label counts")
-        for k, v in counts.items():
-            lines.append(f"- {k}: {v}")
-
-    return "\n".join(lines)
-
-def _render_textual_results(results: pd.DataFrame) -> str:
-    if results is None or results.empty:
-        return "<p>No textual relations found.</p>"
-
-def run_textual_analysis(schema_state, data_state, selected_node):
-    try:
-        if not schema_state:
-            raise gr.Error("Load schema first.")
-
-        if not selected_node:
-            raise gr.Error("Select a node.")
-
-        schema = next((s for s in schema_state if s.name == selected_node), None)
-        if schema is None:
-            raise gr.Error(f"Schema for node '{selected_node}' was not found.")
-
-        df = data_state.get(selected_node)
-        if df is None or df.empty:
-            return (
-                f"No data available for node `{selected_node}`.",
-                "<p>No data available</p>",
-                pd.DataFrame(),
-            )
-
-        analyzer = TextualFeatureAnalyzer(
-            node_schema=schema,
-            relation_model=relation_model_wrapper,
-            max_value_samples=5,
-        )
-
-        results = analyzer.analyze(df)
-
-        summary_md = _build_textual_status_md(schema.name, results)
-        results_html = _render_textual_results(results)
-
-        return summary_md, results_html, results
-
-    except Exception as e:
-        return (
-            f"<div style='color:red;font-weight:700'>Error: {e}</div>",
-            "<p>Error running textual analysis.</p>",
-            pd.DataFrame(),
-        )
 
 with gr.Blocks(
-    title="ICDC Synthetic Data Demo"
+    title="ICDC Synthetic Data Demo",
+    head=AG_GRID_HEAD + f"<style>{CUSTOM_CSS}</style>",
 ) as demo:
     gr.Markdown("# ICDC Synthetic Data Demo\nAnalyze learned property relationships, visualize them, and generate synthetic rows.")
     
@@ -901,10 +845,7 @@ with gr.Blocks(
         outputs=[schema_markdown, schema_state, error_box],
     )
     # NodeSchema
-    with gr.Row():
-        run_analysis_btn = gr.Button("Run Property analysis")
-        textual_analyze_btn = gr.Button("Textual Analyze")
-    # run_analysis_btn = gr.Button("Run Property analysis")
+    run_analysis_btn = gr.Button("Run Property analysis")
 
     analysis_state = gr.State({})
     relationship_state = gr.State({})
@@ -944,25 +885,6 @@ with gr.Blocks(
         outputs=feature_tables_html
     )
 
-    # textual analysis summary
-    textual_analysis_summary = gr.Markdown()
-    textual_analysis_table = gr.HTML()
-    textual_analysis_state = gr.State(pd.DataFrame())
-
-    textual_analyze_btn.click(
-    fn=run_textual_analysis,
-    inputs=[
-        schema_state,
-        view_data_node_file_state,
-        view_data_node_select,
-    ],
-    outputs=[
-        textual_analysis_summary,
-        textual_analysis_table,
-        textual_analysis_state,
-    ],
-)
-
     # generate data
     num_rows_input = gr.Number(
         label="Number of rows to generate",
@@ -989,10 +911,7 @@ with gr.Blocks(
 
 
 def main() -> None:
-    demo.launch(
-        server_name="0.0.0.0",
-        server_port=int(os.getenv("PORT", "7860")),
-        head=AG_GRID_HEAD + f"<style>{CUSTOM_CSS}</style>",
-    )
+    demo.launch(server_name="0.0.0.0", server_port=int(os.getenv("PORT", "7860")))
+
 if __name__ == "__main__":
     main()

@@ -11,6 +11,8 @@ from schema import NodeSchema
 from feature.categorical import CategoricalFeatureAnalyzer
 from feature.substring import SubstringFeatureAnalyzer
 from feature.cluster import ClusteringFeatureAnalyzer
+from feature.bio_term_overlap import BioTermFeatureAnalyzer
+
 
 @dataclass(frozen=True)
 class RelationshipResult:
@@ -56,9 +58,10 @@ class PairwiseRelationshipEvaluator(FeatureBase):
             node_schema=self.node_schema,
             doc_model=self.doc_model,
         )
-        # self.semantic = SemanticFeatureAnalyzer(
-        #     node_schema=self.node_schema,
-        # )
+        self.bio_term = BioTermFeatureAnalyzer(
+            node_schema=self.node_schema,
+            doc_model=self.doc_model,
+        )
 
     def get_model_columns(self, df: pd.DataFrame) -> list[str]:
         schema_columns = list(getattr(self.node_schema, "properties", {}).keys())
@@ -77,6 +80,7 @@ class PairwiseRelationshipEvaluator(FeatureBase):
             for b in columns:
                 if a == b:
                     continue
+                # results.append(self.categorical.analyze(df, a, b))
                 cat_result = self.categorical.analyze(df, a, b)
                 if cat_result is not None:
                     results.append(cat_result)
@@ -86,7 +90,9 @@ class PairwiseRelationshipEvaluator(FeatureBase):
                 cluster_result = self.cluster.analyze(df, a, b)
                 if cluster_result is not None:
                     results.append(cluster_result)
-                
+                bio_term_result = self.bio_term.analyze(df, a, b)
+                if bio_term_result is not None:
+                    results.append(bio_term_result)
 
         results_df = pd.DataFrame(results)
         if not results_df.empty:

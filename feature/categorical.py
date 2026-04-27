@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-import json
+import json, re
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
@@ -25,9 +25,16 @@ CATEGORICAL_WEIGHT_PROFILES = {
         "predictive_strength": 0.001,
         "determinism": 0.001,
         "stability": 0.001,
-        "doc_alignment": 0.001,
+        "doc_alignment": 0.8,
     },
     "sample": {
+        "support": 0.25,
+        "predictive_strength": 0.30,
+        "determinism": 0.20,
+        "stability": 0.15,
+        "doc_alignment": 0.10,
+    },
+    "diagnosis": {
         "support": 0.25,
         "predictive_strength": 0.30,
         "determinism": 0.20,
@@ -61,10 +68,34 @@ def is_missing(value: Any) -> bool:
     return isinstance(value, str) and value.strip().lower() in MISSING_STRINGS
 
 
+# def normalize_value(value: Any) -> str:
+#     if is_missing(value):
+#         return ""
+#     return str(value).strip()
+
+
 def normalize_value(value: Any) -> str:
     if is_missing(value):
         return ""
+
+    # 🔥 handle list-like values
+    if isinstance(value, list):
+        return " ".join(str(v) for v in value)
+
+    # 🔥 handle JSON-encoded lists (your case)
+    if isinstance(value, str):
+        v = value.strip()
+        if v.startswith("[") and v.endswith("]"):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return " ".join(str(x) for x in parsed)
+            except Exception:
+                pass
+        return v
+
     return str(value).strip()
+
 
 # keeps only columns a and b
 # converts missing-like values to empty strings
