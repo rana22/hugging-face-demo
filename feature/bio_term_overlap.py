@@ -12,6 +12,7 @@ from .doc_alignment import DocAlignmentModel
 from schema import NodeSchema
 from sentence_transformers import SentenceTransformer
 
+
 # -----------------------------
 # BIO TERM WEIGHT PROFILES
 # -----------------------------
@@ -121,19 +122,13 @@ def bio_term_vector_score(df: pd.DataFrame, a: str, b: str) -> float:
 @dataclass
 class BioTermFeatureAnalyzer:
     node_schema: NodeSchema
-    doc_model: DocAlignmentModel
     weights: dict[str, float] = field(init=False)
 
-    def __post_init__(self):
-        object.__setattr__(
-            self,
-            "weights",
-            get_bioterm_weights(self.node_schema.name)
-        )
-    
-    def _build_evidence(self, pair: pd.DataFrame, a: str, b: str, limit: int = 5) -> list[dict[str, Any]]:
-        if pair.empty:
-            return []
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "weights", {
+            "support": 0.10,
+            "bio_vector_similarity": 0.90,
+        })
 
     @staticmethod
     def classify_strength(score: float) -> str:
@@ -147,10 +142,7 @@ class BioTermFeatureAnalyzer:
             return "weak"
         return "independent"
 
-    def analyze(self, df: pd.DataFrame, a: str, b: str) -> dict[str, Any] | None:
-        # ✅ guard (same as categorical)
-        if self.weights is None:
-            return None
+    def analyze(self, df: pd.DataFrame, a: str, b: str) -> dict[str, Any]:
 
         pair = prepare_pair_frame(df, a, b)
 
@@ -158,29 +150,111 @@ class BioTermFeatureAnalyzer:
         row_count = len(pair)
         support = float(row_count / total_rows) if total_rows else 0.0
 
-        # ✅ compute vector similarity
         vector_score = bio_term_vector_score(pair, a, b)
 
-        # ✅ doc alignment (restore it)
-        doc_alignment = float(self.doc_model.score(a, b))
-
-        # ✅ FIXED weight keys
         strength = (
             self.weights["support"] * support
-            + self.weights["bio_term_overlap"] * vector_score
-            + self.weights["doc_alignment"] * doc_alignment
+            + self.weights["bio_vector_similarity"] * vector_score
         )
 
         return {
             "A": a,
             "B": b,
-            "feature_type": "bio_term",
+            "feature_type": "bio_term_vector",
             "support": support,
-            "bio_term_overlap": vector_score,
-            "doc_alignment": doc_alignment,
+            "bio_vector_similarity": vector_score,
             "strength": float(np.clip(strength, 0.0, 1.0)),
             "classification": self.classify_strength(strength),
             "row_count": row_count,
             "total_rows": total_rows,
-            "evidence": self._build_evidence(pair, a, b),
         }
+
+# -----------------------------
+# ANALYZER
+# -----------------------------
+# @dataclass
+# class BioTermFeatureAnalyzer:
+#     node_schema: NodeSchema
+#     doc_model: DocAlignmentModel
+#     weights: dict[str, float] = field(init=False)
+
+#     def __post_init__(self) -> None:
+#         object.__setattr__(self, "weights", get_bioterm_weights(self.node_schema.name))
+
+    # @staticmethod
+    # def classify_strength(score: float) -> str:
+    #     if score >= 0.9:
+    #         return "functional"
+    #     if score >= 0.7:
+    #         return "strong"
+    #     if score >= 0.45:
+    #         return "conditional"
+    #     if score >= 0.2:
+    #         return "weak"
+    #     return "independent"
+
+    # def analyze(self, df: pd.DataFrame, a: str, b: str) -> dict[str, Any] | None:
+    #     if self.weights is None:
+    #         return None
+
+    #     pair = prepare_pair_frame(df, a, b)
+
+    #     total_rows = len(df)
+    #     row_count = len(pair)
+
+    #     support = float(row_count / total_rows) if total_rows else 0.0
+
+    #     bio_overlap = bio_term_overlap_score(pair, a, b)
+    #     doc_alignment = float(self.doc_model.score(a, b))
+
+    #     strength = (
+    #         self.weights["support"] * support
+    #         + self.weights["bio_term_overlap"] * bio_overlap
+    #         + self.weights["doc_alignment"] * doc_alignment
+    #     )
+
+    #     return {
+    #         "A": a,
+    #         "B": b,
+    #         "feature_type": "bio_term",
+    #         "support": support,
+    #         "bio_term_overlap": bio_overlap,
+    #         "doc_alignment": doc_alignment,
+    #         "strength": float(np.clip(strength, 0.0, 1.0)),
+    #         "classification": self.classify_strength(strength),
+    #         "row_count": row_count,
+    #         "total_rows": total_rows,
+    #         "evidence": self._build_evidence(pair, a, b),
+    #     }
+
+    # -----------------------------
+    # EVIDENCE
+    # -----------------------------
+    def _build_evidence(
+        self, pair: pd.DataFrame, a: str, b: str, limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        if pair.empty:
+            return []
+
+        evidence: List[Dict[str, Any]] = []
+
+        for _, row in pair.head(limit).iterrows():
+            av = str(row[a])
+            bv = str(row[b])
+
+            terms_a = extract_bio_terms(av)
+            terms_b = extract_bio_terms(bv)
+            overlap = terms_a & terms_b
+
+            evidence.append(
+                {
+                    "A_value": av,
+                    "B_value": bv,
+                    "A_terms": list(terms_a)[:10],
+                    "B_terms": list(terms_b)[:10],
+                    "overlap_terms": list(overlap)[:10],
+                    "overlap_count": len(overlap),
+                }
+            )
+
+        return evidence

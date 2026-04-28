@@ -1,112 +1,14 @@
-## 🚀 Deploying This App on Hugging Face Spaces
-
-This project can be deployed using **Hugging Face Spaces (Gradio)**. Follow the steps below for each team to deploy their own instance.
-
+---
+title: Data Generator MVP
+emoji: 🔥
+colorFrom: green
+colorTo: yellow
+sdk: gradio
+sdk_version: 6.11.0
+app_file: app.py
+pinned: false
+license: unknown
+short_description: 'predict property relation and generate valid data '
 ---
 
-## 📋 Prerequisites
-
-Each team should have:
-
-- A Hugging Face account → https://huggingface.co/join  
-- Git installed  
-- This repository cloned locally  
-
----
-
-## 🧭 Deployment Steps
-
-### 1. Create a New Space
-
-1. Go to: https://huggingface.co/spaces  
-2. Click **“Create new Space”**  
-3. Configure:
-   - **Owner**: Your team/org  
-   - **Space name**: e.g., `icdc-frontend-app`  
-   - **SDK**: `Gradio`  
-   - **Hardware**: CPU (default is fine)  
-   - **Visibility**: Public or Private  
-
-Click **Create Space**
-Create **HUGGIN FACE Acess Key** and add it to .env
-
----
-
-### 2. Clone the Space Repository
-
-```bash
-git clone https://huggingface.co/spaces/<your-username>/<space-name>
-cd <space-name>
-
-### 3. Add Project Files
-
-Copy these files into the Space repo:
-
-```
-app.py
-requirements.txt
-README.md
-```
-
-Make sure:
-
-* `app.py` is at the root
-* Your Gradio app is launched from `app.py`
-
----
-
-### 4. Update `requirements.txt` (Important)
-
-Use a version compatible with Hugging Face (Python 3.13):
-
-```txt
-torch>=2.5.0
-transformers>=4.40.0
-gradio[oauth,mcp]==6.11.0
-websockets>=10.4
-spaces
-
-numpy
-pandas
-scikit-learn
-PyYAML
-neo4j
-python-dotenv
-requests
-matplotlib
-openpyxl
-fastapi
-sentence-transformers
-
-spacy>=3.7.0
-scispacy
-https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_sm-0.5.4.tar.gz
-```
-
----
-
-### 5. Commit and Push
-
-```bash
-git add .
-git commit -m "Deploy app to Hugging Face Space"
-git push
-```
-
----
-
-### 6. Wait for Build
-
-* Go to your Space page
-* Check the **Build Logs**
-* Deployment usually takes 2–10 minutes
-
----
-
-### 7. Access the App
-
-Your app will be live at:
-
-```
-https://huggingface.co/spaces/<your-username>/<space-name>
-```
+Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference

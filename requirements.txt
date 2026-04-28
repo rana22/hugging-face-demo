@@ -20,23 +20,11 @@ python-dotenv
 requests
 matplotlib
 openpyxl
+uvicorn
+fastapi
+
+transformers
+sentence-transformers
+torch
 fastapi
 uvicorn
-
-# 🔥 Fix here: use newer torch compatible with Python 3.13
-torch>=2.5.0
-
-transformers>=4.40.0
-sentence-transformers
-
-# NLP stack (compatible)
-spacy>=3.7.0
-scispacy
-
-# SciSpacy model
-https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_sm-0.5.4.tar.gz
-
-# UI / HF
-gradio[oauth,mcp]==6.11.0
-websockets>=10.4
-spaces

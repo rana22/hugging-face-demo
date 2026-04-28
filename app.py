@@ -20,7 +20,9 @@ from neo4j_loader import fetch_rows_from_neo4j
 from reporting import write_markdown_report
 from schema import load_node_schema, PropertySchema, load_schemas_from_models, node_schemas_to_markdown
 from viz import generate_visual_report
-from evaluator2 import PairwiseRelationshipEvaluator
+from evaluator import PairwiseRelationshipEvaluator
+# from feature.model_wrapper import relation_model_wrapper
+# from feature.textual import TextualFeatureAnalyzer
 
 BASE_DIR = Path(__file__).resolve().parent
 TABLE_JS = (BASE_DIR / "static" / "table.js").read_text(encoding="utf-8")
@@ -307,13 +309,7 @@ def run_analysis(schema_state, data_state, selected_node):
 
         df = data_state.get(selected_node)
         if df is None or df.empty:
-            return (
-                {},
-                {},
-                f"No data available for node `{selected_node}`.",
-                pd.DataFrame(),
-                ""
-            )
+            return {}, {}, f"No data available for node `{selected_node}`.", pd.DataFrame(),
 
         engine = PairwiseRelationshipEvaluator(schema)
         results = engine.evaluate_all_pairs(df)
@@ -327,20 +323,11 @@ def run_analysis(schema_state, data_state, selected_node):
         results_by_node = {selected_node: results.copy()}
         relationship_by_node = {selected_node: results.copy()}
 
-        return (
-            results_by_node,
-            relationship_by_node,
-            summary_md,
-            features_dfs
-        )
+        return results_by_node, relationship_by_node, summary_md, features_dfs
 
     except Exception as e:
-        return (
-            {},
-            {},
-            f"<div style='color:red;font-weight:700'>Error: {e}</div>",
-            pd.DataFrame(),
-        )
+        return {}, {}, f"<div style='color:red;font-weight:700'>Error: {e}</div>", pd.DataFrame(),
+        
 
 
 def render_generated_tables(analysis_df: pd.DataFrame, valid_df: pd.DataFrame, invalid_df: pd.DataFrame) -> tuple[str, str, str]:
@@ -723,10 +710,8 @@ def _build_sortable_table(df: pd.DataFrame, table_id: str, title: str) -> str:
     </div>
     """
 
-
 with gr.Blocks(
-    title="ICDC Synthetic Data Demo",
-    head=AG_GRID_HEAD + f"<style>{CUSTOM_CSS}</style>",
+    title="ICDC Synthetic Data Demo"
 ) as demo:
     gr.Markdown("# ICDC Synthetic Data Demo\nAnalyze learned property relationships, visualize them, and generate synthetic rows.")
     
@@ -845,7 +830,10 @@ with gr.Blocks(
         outputs=[schema_markdown, schema_state, error_box],
     )
     # NodeSchema
-    run_analysis_btn = gr.Button("Run Property analysis")
+    with gr.Row():
+        run_analysis_btn = gr.Button("Run Property analysis")
+        textual_analyze_btn = gr.Button("Textual Analyze")
+    # run_analysis_btn = gr.Button("Run Property analysis")
 
     analysis_state = gr.State({})
     relationship_state = gr.State({})
@@ -885,6 +873,25 @@ with gr.Blocks(
         outputs=feature_tables_html
     )
 
+    # textual analysis summary
+    textual_analysis_summary = gr.Markdown()
+    textual_analysis_table = gr.HTML()
+    textual_analysis_state = gr.State(pd.DataFrame())
+
+    # textual_analyze_btn.click(
+    # fn=run_textual_analysis,
+    # inputs=[
+    #     schema_state,
+    #     view_data_node_file_state,
+    #     view_data_node_select,
+    # ],
+    # outputs=[
+    #     textual_analysis_summary,
+    #     textual_analysis_table,
+    #     textual_analysis_state,
+    # ],
+    # )
+
     # generate data
     num_rows_input = gr.Number(
         label="Number of rows to generate",
@@ -911,7 +918,10 @@ with gr.Blocks(
 
 
 def main() -> None:
-    demo.launch(server_name="0.0.0.0", server_port=int(os.getenv("PORT", "7860")))
-
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=int(os.getenv("PORT", "7860")),
+        head=AG_GRID_HEAD + f"<style>{CUSTOM_CSS}</style>",
+    )
 if __name__ == "__main__":
     main()

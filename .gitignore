@@ -64,4 +64,5 @@ __pycache__/
 
 **/__pycache__
 /feature/__pycache__
-*.pyc
+/feature/__pycache__/**
+/feature/__pycache__/*.pyc

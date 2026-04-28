@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-import json, re
+import json
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
@@ -68,12 +68,6 @@ def is_missing(value: Any) -> bool:
     return isinstance(value, str) and value.strip().lower() in MISSING_STRINGS
 
 
-# def normalize_value(value: Any) -> str:
-#     if is_missing(value):
-#         return ""
-#     return str(value).strip()
-
-
 def normalize_value(value: Any) -> str:
     if is_missing(value):
         return ""
@@ -95,7 +89,6 @@ def normalize_value(value: Any) -> str:
         return v
 
     return str(value).strip()
-
 
 # keeps only columns a and b
 # converts missing-like values to empty strings
