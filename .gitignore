@@ -29,11 +29,6 @@ temp/
 *.tmp
 *.bak
 
-# Data files (optional - if large or sensitive)
-*.csv
-*.json
-*.xlsx
-
 # Model/cache (important for your case)
 .cache/
 *.pt

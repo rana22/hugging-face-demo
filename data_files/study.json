@@ -1,0 +1,16 @@
+[{
+    "type": "study",
+    "study_disposition": "Unrestricted",
+    "dates_of_conduct": "January 2016 – September 2019",
+    "accession_id": "000006",
+    "clinical_study_id": "",
+    "created": "2021-08-13T17:43:44.178000000+00:00",
+    "clinical_study_type": "Genomics",
+    "date_of_iacuc_approval": "2018-03-22",
+    "clinical_study_designation": "OSA01",
+    "updated": "2022-04-28T15:15:30.205000000+00:00",
+    "clinical_study_description": "In order to facilitate comparative studies of canine and human osteosarcoma, this study characterized the genomic landscape of primary and metastatic canine appendicular osteosarcoma through multi-platform analysis of a retrospective cohort of tumors from 59 dogs. Sequencing analyses included whole genome and whole exome sequencing of matched tumor and normal tissue from 24 and 13 dogs, respectively. Of the 13 dogs subject to exome sequencing, 10 have sequencing data from matched primary tumor tissue, metastatic tumor tissue and normal tissue. RNA sequencing analysis is available from 54 primary tumors. Here we provide these multi-omics data not only to expand our genomic understanding of canine and human osteosarcoma, but also to further enable comparisons of genomic techniques (exome, genome, RNA) as well as primary versus metastatic tumors from the same dog.",
+    "uuid": "c06e7880-6efc-54a1-be95-fdccdf66761a",
+    "clinical_study_name": "A Multi-Platform Sequencing Analysis of Canine Appendicular Osteosarcoma."
+  }
+]

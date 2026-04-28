@@ -103,46 +103,5 @@ class PairwiseRelationshipEvaluator(FeatureBase):
 
         return results_df
 
-    def evaluate_all_pairs2(self, df: pd.DataFrame) -> dict[str, pd.DataFrame]:
-        results_by_feature: dict[str, list[dict[str, Any]]] = {}
-        columns = self.get_model_columns(df)
-
-        for a in columns:
-            feature_results: list[dict[str, Any]] = []
-
-            for b in columns:
-                if a == b:
-                    continue
-
-                cat_result = self.categorical.analyze(df, a, b)
-                cat_result["analysis_type"] = "categorical"
-                cat_result["feature"] = a
-                cat_result["compared_with"] = b
-                feature_results.append(cat_result)
-
-                sub_result = self.substring.analyze(df, a, b)
-                sub_result["analysis_type"] = "substring"
-                sub_result["feature"] = a
-                sub_result["compared_with"] = b
-                feature_results.append(sub_result)
-
-            results_by_feature[a] = feature_results
-
-        results_dfs: dict[str, pd.DataFrame] = {}
-
-        for feature, results in results_by_feature.items():
-            result_df = pd.DataFrame(results)
-
-            if not result_df.empty:
-                sort_cols = [c for c in ["analysis_type", "strength", "predictive_strength", "support"] if c in result_df.columns]
-                if sort_cols:
-                    asc = [True] + [False] * (len(sort_cols) - 1)
-                    result_df = result_df.sort_values(sort_cols, ascending=asc).reset_index(drop=True)
-
-            results_dfs[feature] = result_df
-
-        return results_dfs
-
-
 def build_evaluator(node_schema: NodeSchema) -> PairwiseRelationshipEvaluator:
     return PairwiseRelationshipEvaluator(node_schema=node_schema)

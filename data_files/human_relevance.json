@@ -1,0 +1,14 @@
+﻿[
+      {
+        "relevant_experimental_therapeutic_intervention": "[\"camptothecin derivatives and \u2013tecan drug class (topotecan, inrinotecan, belotecan)\"]",
+        "created": "2026-02-26T19:28:28.324000000Z",
+        "relevant_human_pathways": "[\"DNA damage repair, topoisomerase mechanics\"]",
+        "relevant_human_cancer": "[\"Lymphoma\"]",
+        "human_relevance_record_id": "COTC007B",
+        "uuid": "cc842e2d-63d9-57ee-8579-cbf4a8bbdfb7",
+        "human_relevance_statement": "This study in dogs with lymphoma provided important new information on three new cancer drugs in development for humans. The dog study helped the team determine which of the three drugs were going to be most promising for further investigation, which helps researchers prioritize new cancer drugs for study in humans.",
+        "type_": "human_relevance",
+        "relevant_human_genes": "[\"SLFN11\"]",
+        "nci_link_to_relevant_human_cancer": "https://www.cancer.gov/types/lymphoma"
+      }
+]
