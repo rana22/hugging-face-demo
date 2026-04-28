@@ -11,5 +11,6 @@ license: unknown
 short_description: 'predict property relation and generate valid data '
 ---
 
-Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
-refer to Deploy.README.md for hugging face deployment
+
+# Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+# refer to Deploy.README.md for hugging face deployment
