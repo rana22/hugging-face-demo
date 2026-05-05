@@ -44,8 +44,6 @@ class NodeSchema:
     def property_texts(self) -> dict[str, str]:
         return {name: prop.text for name, prop in self.properties.items()}
 
-
-
 def load_node_schema(path: str | Path, nodes = []) -> NodeSchema:
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     node_name = raw.get("node", "sample")

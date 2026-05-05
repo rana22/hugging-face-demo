@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
-
+from typing import Any, Dict
+import os, requests
 import pandas as pd
 
 from feature.doc_alignment import DocAlignmentModel
@@ -11,8 +11,7 @@ from schema import NodeSchema
 from feature.categorical import CategoricalFeatureAnalyzer
 from feature.substring import SubstringFeatureAnalyzer
 from feature.cluster import ClusteringFeatureAnalyzer
-# from feature.bio_term_overlap import BioTermFeatureAnalyzer
-
+from feature.bio_term_overlap import BioTermFeatureAnalyzer
 
 @dataclass(frozen=True)
 class RelationshipResult:
@@ -41,7 +40,6 @@ class RelationshipResult:
     def from_dict(cls, row: dict[str, Any]) -> "RelationshipResult":
         return cls(**row)
 
-
 class PairwiseRelationshipEvaluator(FeatureBase):
     def __init__(self, node_schema: NodeSchema):
         self.node_schema = node_schema
@@ -58,10 +56,10 @@ class PairwiseRelationshipEvaluator(FeatureBase):
             node_schema=self.node_schema,
             doc_model=self.doc_model,
         )
-        # self.bio_term = BioTermFeatureAnalyzer(
-        #     node_schema=self.node_schema,
-        #     doc_model=self.doc_model,
-        # )
+        self.bio_term = BioTermFeatureAnalyzer(
+            node_schema=self.node_schema,
+            doc_model=self.doc_model,
+        )
 
     def get_model_columns(self, df: pd.DataFrame) -> list[str]:
         schema_columns = list(getattr(self.node_schema, "properties", {}).keys())
@@ -71,6 +69,9 @@ class PairwiseRelationshipEvaluator(FeatureBase):
 
     def evaluate(self, df: pd.DataFrame) -> pd.DataFrame:
         return self.evaluate_all_pairs(df)
+
+    def get_bio_score(self, a: str, b: str) -> float:
+        return self._bio_cache.get((a, b), 0.0)
 
     def evaluate_all_pairs(self, df: pd.DataFrame) -> pd.DataFrame:
         results: list[dict[str, Any]] = []
@@ -90,9 +91,9 @@ class PairwiseRelationshipEvaluator(FeatureBase):
                 cluster_result = self.cluster.analyze(df, a, b)
                 if cluster_result is not None:
                     results.append(cluster_result)
-                # bio_term_result = self.bio_term.analyze(df, a, b)
-                # if bio_term_result is not None:
-                #     results.append(bio_term_result)
+        bio_term_result = self.bio_term.analyze(df)
+        if bio_term_result is not None:
+            results.append(bio_term_result)
 
         results_df = pd.DataFrame(results)
         if not results_df.empty:

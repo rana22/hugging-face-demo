@@ -215,6 +215,27 @@ def export_query_to_json(
     return rows
 
 
+sample_query = """
+    MATCH (s:study)<-[*]-(smpl:sample)
+    WHERE s.clinical_study_designation = $study_id
+    RETURN smpl { .* } AS smpl
+"""
+
+file_query = """
+    MATCH (s: study) <-[*]- (f:file) WHERE s.clinical_study_designation = $study_id RETURN f { .* } AS f
+"""
+
+all_nodes_query = """
+MATCH (s:study {clinical_study_designation: $study_id})
+MATCH path = (s)-[*1..3]-(n)
+
+WHERE ALL(x IN nodes(path)
+          WHERE NOT x:study 
+             OR x.clinical_study_designation = $study_id)
+
+RETURN collect(DISTINCT n {.*, type_: labels(n)[0]}) 
+"""
+
 if __name__ == "__main__":
     uri="bolt://localhost:11011"
     user="neo4j"
@@ -228,21 +249,24 @@ if __name__ == "__main__":
         """
     study_id = "OSA01"
     study_param = {"study_id": study_id}
+    queryItems = [
+        ("sample", "smpl", sample_query),
+        ("file", "f", file_query)
+    ]
 
-    sample_query = """
-        MATCH (s:study)<-[*]-(smpl:sample)
-        WHERE s.clinical_study_designation = $study_id
-        RETURN smpl { .* } AS smpl
-    """
 
     try:
-        export_query_to_json(
-            client,
-            sample_query,
-            study_param,
-            output_file="sample_123.json",
-            root_key="smpl"
-        )
+        for item in queryItems:
+            node_name = item[0]
+            key = item[1]
+            query = item[2]
+            export_query_to_json(
+                client,
+                query,
+                study_param,
+                output_file=f"/data/{study_id}/{node_name}.json",
+                root_key=key
+            )
 
     except Exception as e:
         print("An error occurred:", e)

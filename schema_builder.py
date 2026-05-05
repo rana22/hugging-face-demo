@@ -7,6 +7,9 @@ from typing import Any
 import requests
 import yaml
 
+from node_relation import extract_relationships, relationships_to_dataframe, enrich_relationships_with_properties
+
+from graph.DFS import build_graph, bfs_layers, extract_clusters, cluster_with_relations_df, deduplicate
 
 DEFAULT_SKIP = {"sample_id", "crdc_id", "comment", "uuid", "created", "updated"}
 
@@ -85,58 +88,153 @@ def _normalize_node_spec(node_name: str, node_spec: dict[str, Any], prop_defs: d
     out["node_spec"] = node_spec
     return out
 
+# def build_relation_schemas():
+#     node_url = os.getenv("NODE_MODEL_URL", "")
+#     prop_url = os.getenv("PROP_MODEL_URL", "")
+#     node_model = load_yaml_from_url(node_url)
+#     prop_model = load_yaml_from_url(prop_url)
 
-def build_all_node_schemas(
-    *,
-    node_model_url: str,
-    prop_model_url: str,
-    output_dir: str | Path,
-) -> list[Path]:
-    node_model = load_yaml_from_url(node_model_url)
-    prop_model = load_yaml_from_url(prop_model_url)
+#     nodes = _get_nodes(node_model)
+#     prop_defs = _get_prop_defs(prop_model)
 
-    nodes = _get_nodes(node_model)
-    prop_defs = _get_prop_defs(prop_model)
+#     node_schemas = {}
+#     try:
+#         for node_name, node_spec in nodes.items():
+#             if not isinstance(node_spec, dict):
+#                 continue
 
-    out_dir = Path(output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+#             merged = _normalize_node_spec(node_name, node_spec, prop_defs)
+#             merged = remove_yaml_anchors(merged)
+#             node_schemas[node_name] = merged
+#         relationships = extract_relationships(node_model)
+#         relationships = enrich_relationships_with_properties(relationships, node_schemas)
+#         rel_df = relationships_to_dataframe(relationships)
+#         return node_schemas, rel_df, ""
+#     except Exception as e:
+#         return {}, None, f"Error on building relation \n {str(e)}"
 
-    written: list[Path] = []
+def filter_clusters_by_nodes(clusters, node_list):
+    node_set = set(node_list)
 
-    for node_name, node_spec in nodes.items():
-        if not isinstance(node_spec, dict):
-            continue
+    filtered = []
 
-        merged = _normalize_node_spec(node_name, node_spec, prop_defs)
-        merged = remove_yaml_anchors(merged)
+    for cluster in clusters:
+        if all(node in node_set for node in cluster):
+            filtered.append(cluster)
 
-        out_path = out_dir / f"{node_name}_node.yaml"
-        out_path.write_text(
-            yaml.dump(
-                merged,
-                Dumper=NoAliasDumper,
-                sort_keys=False,
-                allow_unicode=True,
-            ),
-            encoding="utf-8",
+    return filtered
+
+def build_relation_schemas(node_list_state):
+    import pandas as pd
+
+    node_url = os.getenv("NODE_MODEL_URL", "")
+    prop_url = os.getenv("PROP_MODEL_URL", "")
+
+    try:
+        node_model = load_yaml_from_url(node_url)
+        prop_model = load_yaml_from_url(prop_url)
+
+        nodes = _get_nodes(node_model)
+        prop_defs = _get_prop_defs(prop_model)
+
+        rows = []
+        node_schemas = {}
+
+        # ✅ Build schemas (same as before)
+        for node_name, node_spec in nodes.items():
+            if not isinstance(node_spec, dict):
+                continue
+
+            merged = _normalize_node_spec(node_name, node_spec, prop_defs)
+            merged = remove_yaml_anchors(merged)
+            node_schemas[node_name] = merged
+
+        # ✅ Process relationships directly → rows
+        relationships = node_model.get("Relationships", {})
+        # avoid circular dependencies
+        explored_src_node = {}
+
+        for rel_name, rel_spec in relationships.items():
+            default_mul = rel_spec.get("Mul", "many_to_one")
+
+            for end in rel_spec.get("Ends", []):
+                src = end.get("Src")
+                dst = end.get("Dst")
+
+                if src == dst:
+                    continue
+
+                if not src or not dst:
+                    continue
+
+                mul = (end.get("Mul") or default_mul).lower()
+
+                # --- resolve direction ---
+                if mul == "many_to_one":
+                    parent, child, rel_type = dst, src, "one_to_many"
+                elif mul == "one_to_many":
+                    parent, child, rel_type = src, dst, "one_to_many"
+                elif mul == "one_to_one":
+                    parent, child, rel_type = dst, src, "one_to_one"
+                elif mul == "many_to_many":
+                    parent, child, rel_type = src, dst, "many_to_many"
+                else:
+                    parent, child, rel_type = dst, src, mul
+
+                parent_props = node_schemas.get(parent, {}).get("properties", {})
+                child_props = node_schemas.get(child, {}).get("properties", {})
+
+                matches = []
+
+                # ✅ simple inline matching (no extra function)
+                for p in parent_props:
+                    for c in child_props:
+                        if p == c or (p in c or c in p):
+                            # optional filter → only id-like
+                            if "id" in p or "id" in c:
+                                matches.append((p, c))
+
+                # ✅ write rows directly
+                if not matches:
+                    rows.append({
+                        "relation": rel_name,
+                        "parent": parent,
+                        "child": child,
+                        "type": rel_type,
+                        "parent_prop": None,
+                        "child_prop": None,
+                    })
+                else:
+                    for p, c in matches:
+                        rows.append({
+                            "relation": rel_name,
+                            "parent": parent,
+                            "child": child,
+                            "type": rel_type,
+                            "parent_prop": f"{parent}.{p}",
+                            "child_prop": f"{child}.{c}",
+                        })
+
+        df = pd.DataFrame(rows).sort_values(
+            by=["parent", "child"]
+        ).reset_index(drop=True)
+
+        # build node tree
+        graph = build_graph(df)
+        path = bfs_layers(graph)
+        clusters = extract_clusters(path)
+        dedup_clusters = deduplicate(clusters)
+
+        filtered_clusters = filter_clusters_by_nodes(
+            dedup_clusters,
+            node_list_state
         )
-        written.append(out_path)
-    return written
+        dedup_clusters = filtered_clusters[:10]
+        cluster_df = cluster_with_relations_df(dedup_clusters, df)
 
-def main() -> None:
-    node_url = os.environ["NODE_MODEL_URL"]
-    prop_url = os.environ["PROP_MODEL_URL"]
+        return node_schemas, df, "", cluster_df
 
-    output_dir = os.environ.get("SCHEMA_OUTPUT_DIR")
+    except Exception as e:
+        return {}, None, f"Error on building relation\n{str(e)}"
 
-    paths = build_all_node_schemas(
-        node_model_url=node_url,
-        prop_model_url=prop_url,
-        output_dir=output_dir,
-    )
-
-    for path in paths:
-        print(f"Wrote {path.resolve()}")
-
-if __name__ == "__main__":
-    main()
+    

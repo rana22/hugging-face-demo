@@ -11,6 +11,8 @@ import gradio as gr
 import pandas as pd
 import yaml
 import html as html_lib
+import tempfile
+
 
 # These imports assume your package is included in the Space repo.
 # If some functions are named differently in your current branch,
@@ -19,6 +21,7 @@ from generator import SyntheticDataGenerator
 from neo4j_loader import fetch_rows_from_neo4j
 from reporting import write_markdown_report
 from schema import load_node_schema, PropertySchema, load_schemas_from_models, node_schemas_to_markdown
+from schema_builder import build_relation_schemas
 from viz import generate_visual_report
 from evaluator import PairwiseRelationshipEvaluator
 # from feature.model_wrapper import relation_model_wrapper
@@ -215,31 +218,71 @@ def load_env_to_text(env_file):
     except Exception as e:
         return f"# Failed to read file: {e}"
 
-def _read_single_file(file_path: str) -> pd.DataFrame:
+# def _read_single_file(file_path: str) -> pd.DataFrame:
+#     _, ext = os.path.splitext(file_path)
+#     ext = ext.lower()
+
+#     if ext in [".xlsx", ".xls"]:
+#         df = pd.read_excel(file_path)
+#     elif ext == ".json":
+#         # Supports JSON array or JSON object
+#         with open(file_path, "r", encoding="utf-8-sig") as f:
+#             data = json.load(f)
+
+#         if isinstance(data, list):
+#             df = pd.DataFrame(data)
+#         elif isinstance(data, dict):
+#             # If the JSON is a single object, wrap it as one row
+#             df = pd.DataFrame([data])
+#         else:
+#             raise ValueError(f"Unsupported JSON structure in {file_path}")
+#     else:
+#         raise ValueError(f"Unsupported file type: {ext}")
+
+#     if "type" not in df.columns and "type_" not in df.columns:
+#         raise ValueError(f"Missing required column/key 'type' in {file_path}. Type refers to node (sample, study, file, case..)")
+
+#     return df
+
+def _read_single_file(file_path: str) -> dict[str, pd.DataFrame]:
     _, ext = os.path.splitext(file_path)
     ext = ext.lower()
 
     if ext in [".xlsx", ".xls"]:
         df = pd.read_excel(file_path)
+
     elif ext == ".json":
-        # Supports JSON array or JSON object
         with open(file_path, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
 
-        if isinstance(data, list):
-            df = pd.DataFrame(data)
-        elif isinstance(data, dict):
-            # If the JSON is a single object, wrap it as one row
-            df = pd.DataFrame([data])
-        else:
+        if isinstance(data, dict):
+            data = [data]
+
+        if not isinstance(data, list):
             raise ValueError(f"Unsupported JSON structure in {file_path}")
+
+        df = pd.DataFrame(data)
+
     else:
         raise ValueError(f"Unsupported file type: {ext}")
 
-    if "type" not in df.columns and "type_" not in df.columns:
-        raise ValueError(f"Missing required column/key 'type' in {file_path}. Type refers to node (sample, study, file, case..)")
+    # normalize type column
+    if "type_" in df.columns:
+        df.rename(columns={"type_": "type"}, inplace=True)
 
-    return df
+    if "type" not in df.columns:
+        raise ValueError(f"Missing 'type' field in {file_path}")
+
+    # ✅ split by node type
+    node_dfs = {}
+
+    for node_type, group in df.groupby("type"):
+        # drop irrelevant columns (all-null columns)
+        clean_df = group.drop(columns=["type"]).dropna(axis=1, how="all")
+
+        node_dfs[node_type] = clean_df.reset_index(drop=True)
+
+    return node_dfs
 
 def get_excel_or_json_data(files):
     try:
@@ -251,14 +294,27 @@ def get_excel_or_json_data(files):
 
         grouped_data: dict[str, pd.DataFrame] = {}
 
-        for file_path in files:
-            df = _read_single_file(file_path)
-            if "type" in df.columns:
-                df["_node_type"] = df["type"]
-            elif "type_" in df.columns:
-                df["_node_type"] = df["type_"]
+        # for file_path in files:
+        #     df = _read_single_file(file_path)
+        #     if "type" in df.columns:
+        #         df["_node_type"] = df["type"]
+        #     elif "type_" in df.columns:
+        #         df["_node_type"] = df["type_"]
 
-            for node_name, node_df in df.groupby("_node_type", dropna=False):
+        #     for node_name, node_df in df.groupby("_node_type", dropna=False):
+        #         node_key = str(node_name)
+
+        #         if node_key in grouped_data:
+        #             grouped_data[node_key] = pd.concat(
+        #                 [grouped_data[node_key], node_df.copy()],
+        #                 ignore_index=True
+        #             )
+        #         else:
+        #             grouped_data[node_key] = node_df.copy()
+        for file_path in files:
+            node_dfs = _read_single_file(file_path)  # now returns dict
+
+            for node_name, node_df in node_dfs.items():
                 node_key = str(node_name)
 
                 if node_key in grouped_data:
@@ -710,6 +766,14 @@ def _build_sortable_table(df: pd.DataFrame, table_id: str, title: str) -> str:
     </div>
     """
 
+def download_relations(df: pd.DataFrame):
+    if df is None or df.empty:
+        return None
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
+    df.to_csv(tmp.name, index=False)
+    return tmp.name
+
 with gr.Blocks(
     title="ICDC Synthetic Data Demo"
 ) as demo:
@@ -829,6 +893,36 @@ with gr.Blocks(
         inputs=[env_text, node_list_state],
         outputs=[schema_markdown, schema_state, error_box],
     )
+
+    load_relations_btn = gr.Button("View Node Relations")
+    schema_markdown_1 = gr.JSON(label="Schema View")
+    view_relation_table = gr.Dataframe(label="Relation", interactive=False)
+    
+    download_btn = gr.Button("Download Relations CSV")
+    download_file = gr.File(label="Download file")
+    rel_df_state = gr.State()
+    node_tree_table = gr.Dataframe(label="Node Tree", interactive=False)
+
+    load_relations_btn.click(
+        fn=build_relation_schemas,
+        inputs=[node_list_state],
+        outputs=[schema_markdown_1, view_relation_table, error_box, node_tree_table],
+    )
+
+    download_btn.click(
+        fn=download_relations,
+        inputs=view_relation_table,
+        outputs=download_file,
+    )
+
+    # node tree
+    # gen_node_tree_btn = gr.Button("Gen Node Tree")
+    # gen_node_tree_btn.click(
+    #     fn=clusters_to_df,
+    #     inputs=paths,
+    #     outputs=node_tree_table,
+    # )
+    
     # NodeSchema
     with gr.Row():
         run_analysis_btn = gr.Button("Run Property analysis")
