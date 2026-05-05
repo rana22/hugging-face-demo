@@ -91,9 +91,9 @@ class PairwiseRelationshipEvaluator(FeatureBase):
                 cluster_result = self.cluster.analyze(df, a, b)
                 if cluster_result is not None:
                     results.append(cluster_result)
-        bio_term_result = self.bio_term.analyze(df)
-        if bio_term_result is not None:
-            results.append(bio_term_result)
+        # bio_term_result = self.bio_term.analyze(df)
+        # if bio_term_result is not None:
+        #     results.append(bio_term_result)
 
         results_df = pd.DataFrame(results)
         if not results_df.empty:

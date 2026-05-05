@@ -10,13 +10,7 @@ from .categorical import normalize_value, prepare_pair_frame
 from .doc_alignment import DocAlignmentModel
 from schema import NodeSchema
 
-
 CLUSTERING_WEIGHT_PROFILES = {
-    "default": {
-        "support": 0.20,
-        "separation": 0.60,
-        "doc_alignment": 0.20,
-    },
     "file": {
         "support": 0.20,
         "separation": 0.60,
@@ -27,7 +21,7 @@ CLUSTERING_WEIGHT_PROFILES = {
 
 def get_clustering_weights(node_name: str) -> dict[str, float]:
     key = (node_name or "").lower()
-    return CLUSTERING_WEIGHT_PROFILES.get(key, CLUSTERING_WEIGHT_PROFILES["default"])
+    return CLUSTERING_WEIGHT_PROFILES.get(key)
 
 
 @dataclass
@@ -303,6 +297,10 @@ class ClusteringFeatureAnalyzer:
         return float(np.clip(0.65 * within + 0.35 * between, 0.0, 1.0))
 
     def analyze(self, df: pd.DataFrame, a: str, b: str) -> dict[str, Any] | None:
+        # print(self.weights)
+        if self.weights is None:
+            return None
+        
         if not self._is_applicable(df, a, b):
             return None
 

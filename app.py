@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
+import os, re 
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -13,7 +13,6 @@ import yaml
 import html as html_lib
 import tempfile
 
-
 # These imports assume your package is included in the Space repo.
 # If some functions are named differently in your current branch,
 # adjust the import lines only.
@@ -24,6 +23,7 @@ from schema import load_node_schema, PropertySchema, load_schemas_from_models, n
 from schema_builder import build_relation_schemas
 from viz import generate_visual_report
 from evaluator import PairwiseRelationshipEvaluator
+from cross_evaluator import CrossNodeRelationshipEvaluator, find_selected_path, find_selected_edges
 # from feature.model_wrapper import relation_model_wrapper
 # from feature.textual import TextualFeatureAnalyzer
 
@@ -165,30 +165,6 @@ def _parse_env_text(env_text: str) -> dict[str, str]:
         k, v = line.split("=", 1)
         out[k.strip()] = v.strip().strip('"').strip("'")
     return out
-
-
-def _load_env_upload(env_file) -> dict[str, str]:
-    if env_file is None:
-        return {}
-
-    if isinstance(env_file, (str, Path)):
-        path = Path(env_file)
-    else:
-        path = Path(env_file.name)
-
-    text = path.read_text(encoding="utf-8")
-    return _parse_env_text(text)
-
-def _fetch_node_names() -> list[str]:
-    node_url = os.getenv("NODE_MODEL_URL", "")
-    if not node_url:
-        return []
-
-    resp = requests.get(node_url, timeout=30)
-    resp.raise_for_status()
-    data = yaml.safe_load(resp.text)
-    nodes = data.get("Nodes", {}) or data.get("nodes", {}) or {}
-    return sorted(nodes.keys())
 
 def toggle_schema_fields(mode):
     return gr.update(visible=(mode == "upload"))
@@ -383,8 +359,187 @@ def run_analysis(schema_state, data_state, selected_node):
 
     except Exception as e:
         return {}, {}, f"<div style='color:red;font-weight:700'>Error: {e}</div>", pd.DataFrame(),
-        
 
+
+def extract_node_branches(rel_df: pd.DataFrame, selected_nodes: list[str]) -> pd.DataFrame:
+    if rel_df.empty:
+        return pd.DataFrame()
+
+    return rel_df[
+        rel_df["parent_node"].isin(selected_nodes) &
+        rel_df["child_node"].isin(selected_nodes)
+    ].reset_index(drop=True)
+
+def extract_node_branches(rel_df: pd.DataFrame, selected_nodes: list[str]) -> pd.DataFrame:
+    if rel_df.empty:
+        return pd.DataFrame()
+
+    return rel_df[
+        rel_df["parent_node"].isin(selected_nodes) &
+        rel_df["child_node"].isin(selected_nodes)
+    ].reset_index(drop=True)
+
+def chunked(seq, size):
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+def run_cross_analysis(schema_state, node_data_state, node_tree, selected_nodes):
+    try:
+        if not schema_state:
+            raise gr.Error("Load schema first.")
+
+        if not selected_nodes or len(selected_nodes) < 2:
+            raise gr.Error("Select at least two nodes for cross-node analysis.")
+
+        if len(node_data_state) < 2:
+            raise gr.Error("Not enough valid node data for cross analysis.")
+
+        # hard cap: avoid huge selections
+        selected_nodes = list(dict.fromkeys(selected_nodes))[:8]
+
+        edges = find_selected_edges(node_tree, selected_nodes)
+
+        if not edges:
+            return {}, {}, "No edges found for selected nodes.", {}, pd.DataFrame(), ""
+
+        cross_eval = CrossNodeRelationshipEvaluator(node_schemas=schema_state)
+
+        all_results = []
+        batch_size = 5
+
+        for edge_batch in chunked(edges, batch_size):
+            batch_df = cross_eval.analyze(
+                node_dfs=node_data_state,
+                edges=edge_batch
+            )
+            if batch_df is not None and not batch_df.empty:
+                all_results.append(batch_df)
+
+        if not all_results:
+            return {}, {}, "No cross-node relationships detected.", {}, pd.DataFrame(), ""
+
+        cross_results = pd.concat(all_results, ignore_index=True)
+
+        cross_results = cross_results.sort_values(
+            "strength", ascending=False
+        ).reset_index(drop=True)
+
+        html_table = _build_sortable_table(
+            cross_results,
+            "cross_node_analysis_html_table",
+            "fuzzy search"
+        )
+
+        summary_md = _build_status_md("Cross Node", None, cross_results)
+
+        if "feature_type" in cross_results.columns:
+            features_dfs = dict(tuple(cross_results.groupby("feature_type")))
+        else:
+            features_dfs = {}
+
+        results_by_node = {"cross_node": cross_results.copy()}
+        relationship_by_node = {"cross_node": cross_results.copy()}
+
+        return (
+            results_by_node,
+            relationship_by_node,
+            summary_md,
+            features_dfs,
+            cross_results,
+            html_table
+        )
+
+    except Exception as e:
+        print(f"[CROSS ANALYSIS ERROR] {e}")
+        return {}, {}, f"<div style='color:red;font-weight:700'>Error: {e}</div>", {}, pd.DataFrame(), ""
+
+# def run_cross_analysis(
+#     schema_state, 
+#     node_data_state, 
+#     node_tree,
+#     selected_nodes
+# ):
+#     try:
+#         if not schema_state:
+#             raise gr.Error("Load schema first.")
+
+#         if not selected_nodes or len(selected_nodes) < 2:
+#             raise gr.Error("Select at least two nodes for cross-node analysis.")
+
+#         if len(node_data_state) < 2:
+#             raise gr.Error("Not enough valid node data for cross analysis.")
+
+#         print("CrossNodeRelationshipEvaluator")
+#         # --------------------------------------
+#         # Run evaluator (node_tree-aware)
+#         # --------------------------------------
+#         print("cross_results")
+#         print(selected_nodes)
+
+#         # print(node_tree)
+#         edges = find_selected_edges(node_tree, selected_nodes)
+#         print(edges)
+#         # get the node tree with the selcted nodes
+
+#         cross_eval = CrossNodeRelationshipEvaluator(
+#             node_schemas=schema_state
+#         )
+#         # cross_results = cross_eval.analyze_edges(
+#         #     node_dfs=node_data_state,
+#         #     edges=edges
+#         # )
+
+#         cross_results = cross_eval.analyze(
+#             node_dfs=node_data_state,
+#             edges=edges
+#         )
+#         print(cross_results)
+#         # print(node_dfs)
+
+#         if cross_results.empty:
+#             return {}, {}, "No cross-node relationships detected.", {}, pd.DataFrame()
+
+#         # --------------------------------------
+#         # Sort results
+#         # --------------------------------------
+#         cross_results = cross_results.sort_values(
+#             "strength", ascending=False
+#         ).reset_index(drop=True)
+
+#         html_table = _build_sortable_table(
+#             cross_results,
+#             "cross_node_analysis_html_table",
+#             "fuzzy search"
+#         )
+
+#         # --------------------------------------
+#         # Summary
+#         # --------------------------------------
+#         summary_md = _build_status_md("Cross Node", None, cross_results)
+
+#         # --------------------------------------
+#         # Feature grouping
+#         # --------------------------------------
+#         if "feature_type" in cross_results.columns:
+#             features_dfs = dict(tuple(cross_results.groupby("feature_type")))
+#         else:
+#             features_dfs = {}
+
+#         results_by_node = {"cross_node": cross_results.copy()}
+#         relationship_by_node = {"cross_node": cross_results.copy()}
+
+#         return (
+#             results_by_node,
+#             relationship_by_node,
+#             summary_md,
+#             features_dfs,
+#             cross_results,
+#             html_table
+#         )
+
+#     except Exception as e:
+#         print(f"[CROSS ANALYSIS ERROR] {e}")
+#         return {}, {}, f"<div style='color:red;font-weight:700'>Error: {e}</div>", {}, pd.DataFrame(), ""
 
 def render_generated_tables(analysis_df: pd.DataFrame, valid_df: pd.DataFrame, invalid_df: pd.DataFrame) -> tuple[str, str, str]:
     analysis_html = (
@@ -406,168 +561,6 @@ def render_generated_tables(analysis_df: pd.DataFrame, valid_df: pd.DataFrame, i
     )
 
     return analysis_html, valid_html, invalid_html, ""
-
-def run_pipeline(
-    env_text: str,
-    env_upload,
-    schema_mode: str,
-    node_name,
-    schema_yaml_text: str,
-    study_id: str,
-    neo4j_limit: int,
-    output_rows: int,
-    use_neo4j: bool,
-    viz: bool,
-) -> tuple[str, str | None, str | None, list[tuple[str, str]], str]:
-    env_values: dict[str, str] = {}
-    env_values.update(_parse_env_text(env_text))
-    env_values.update(_load_env_upload(env_upload))
-    for k, v in env_values.items():
-        os.environ[k] = v
-
-    selected_nodes = node_name if isinstance(node_name, list) else [node_name]
-    selected_nodes = [n for n in selected_nodes if n]
-
-    results_by_node: dict[str, pd.DataFrame] = {}
-    generated_by_node: dict[str, pd.DataFrame] = {}
-    summary_by_node: dict[str, str] = {}
-    relationship_by_node: dict[str, pd.DataFrame] = {}
-
-    if not selected_nodes:
-        raise gr.Error("Choose at least one node.")
-
-    if schema_mode == "upload" and len(selected_nodes) != 1:
-        raise gr.Error("Upload mode currently supports exactly one selected node.")
-
-    if schema_mode == "generated":
-        node_url = os.getenv("NODE_MODEL_URL", "")
-        prop_url = os.getenv("PROP_MODEL_URL", "")
-        if not node_url or not prop_url:
-            raise gr.Error("Set NODE_MODEL_URL and PROP_MODEL_URL in the environment.")
-
-        node_model = yaml.safe_load(requests.get(node_url, timeout=30).text)
-        prop_model = yaml.safe_load(requests.get(prop_url, timeout=30).text)
-        nodes = node_model.get("Nodes", {}) or node_model.get("nodes", {}) or {}
-        props = prop_model.get("PropDefinitions", {}) or prop_model.get("properties", {}) or {}
-    else:
-        if not schema_yaml_text.strip():
-            raise gr.Error("Please paste or upload a node schema YAML.")
-        schema_data = yaml.safe_load(schema_yaml_text)
-        nodes = schema_data.get("Nodes", {}) or schema_data.get("nodes", {}) or {}
-        props = {}
-
-    output_dir = Path(tempfile.mkdtemp(prefix="icdc_demo_"))
-    excel_path = output_dir / f"{study_id or 'all'}_results.xlsx"
-    combined_report_path = output_dir / f"{study_id or 'all'}_strong_relationships.md"
-
-    summary_parts: list[str] = []
-    chart_items: list[tuple[str, str]] = []
-    synth_messages: list[str] = []
-
-    with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-        for selected_node in selected_nodes:
-            if schema_mode == "generated":
-                if selected_node not in nodes:
-                    raise gr.Error(f"Node '{selected_node}' not found in node model.")
-
-                node_spec = nodes[selected_node]
-                merged = {
-                    "node": selected_node,
-                    "description": node_spec.get("Desc", ""),
-                    "exclude_like": ["sample_id", "crdc_id", "comment", "uuid", "created", "updated"],
-                    "properties": {},
-                }
-
-                for p in node_spec.get("Props", []) or node_spec.get("props", []):
-                    if p in props:
-                        spec = props[p]
-                        merged["properties"][p] = {
-                            "description": spec.get("Desc", ""),
-                            "type": spec.get("Type", spec.get("type")),
-                            "enum": spec.get("Enum", spec.get("enum", [])) or [],
-                            "required": spec.get("Req", spec.get("required")),
-                            "tags": spec.get("Tags", spec.get("tags", {})) or {},
-                        }
-
-                with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8") as tmp:
-                    yaml.safe_dump(merged, tmp, sort_keys=False)
-                    schema_path = tmp.name
-            else:
-                # Upload mode assumes the pasted YAML already describes the selected node.
-                schema_path = None
-                with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8") as tmp:
-                    yaml.safe_dump(schema_data, tmp, sort_keys=False)
-                    schema_path = tmp.name
-
-            schema = load_node_schema(schema_path, nodes)
-
-            if use_neo4j:
-                df = fetch_rows_from_neo4j(
-                    schema,
-                    study_id=study_id or None,
-                    limit=neo4j_limit or None,
-                )
-            else:
-                raise gr.Error(
-                    "This demo Space is configured for Neo4j-backed loading. "
-                    "Turn on the Neo4j toggle and provide env values."
-                )
-
-            # engine = PairwiseFeatureEngine(schema, doc_model)
-            engine = PairwiseRelationshipEvaluator(schema)
-            results = engine.evaluate_all_pairs(df)
-
-            # summarize for each node
-            summary_by_node.setdefault(schema.name, _build_status_md(schema.name, study_id or None, results))
-            sheet_name = _safe_excel_sheet_name(schema.name, set(writer.book.sheetnames))
-            results.to_excel(writer, sheet_name=sheet_name, index=False)
-
-            node_report_path = output_dir / f"{sheet_name}_strong_relationships.md"
-            write_markdown_report(results, node_report_path)
-
-            if viz:
-                node_chart_dir = output_dir / sheet_name
-                node_chart_dir.mkdir(parents=True, exist_ok=True)
-                chart_paths = generate_visual_report(results, node_chart_dir, top_n=15)
-                for p in chart_paths:
-                    chart_items.append((str(p), f"{schema.name}: {p.name}"))
-
-            node_key = selected_node
-            summary_by_node[node_key] = _build_status_md(node_key, study_id or None, results)
-            if not results.empty:
-                results_by_node[node_key] = results.copy()
-                columns = list(df.columns)
-                gen = SyntheticDataGenerator(
-                    real_rows=df,
-                    relationships=results,
-                    schema=schema,
-                )
-                synth_df = gen.generate(output_rows)
-                print(f"generated {len(synth_df)}")
-
-                generated_by_node[node_key] = synth_df.copy()
-                synth_csv = output_dir / f"{sheet_name}_synthetic_rows.csv"
-                synth_json = output_dir / f"{sheet_name}_synthetic_rows.json"
-                synth_df.to_csv(synth_csv, index=False)
-                synth_df.to_json(synth_json, orient="records", indent=2)
-                synth_messages.append(f"{node_key}: generated {len(synth_df)} synthetic rows")
-            else:
-                synth_messages.append(f"{schema.name}: synthetic generation skipped (no relationships)")
-
-    combined_report_path.write_text("\n\n---\n\n".join(summary_parts), encoding="utf-8")
-
-    # summary = "\n\n---\n\n".join(summary_parts)
-    synth_msg = "\n".join(synth_messages) if synth_messages else "Synthetic generation skipped."
-
-    return (
-        summary_by_node,
-        chart_items,
-        synth_msg,
-        results_by_node,
-        generated_by_node,
-        relationship_by_node,
-        gr.update(choices=selected_nodes, value=selected_nodes[0]),
-    )
 
 def show_node_sumamry_tables(
     selected_node: str,
@@ -703,7 +696,28 @@ def get_display_df(df: pd.DataFrame, feature_type: str) -> pd.DataFrame:
     cols = [c for c in cols if c in df.columns]
     return df[cols].copy()
 
-def _cell_html(value) -> str:
+# def _cell_html(value) -> str:
+#     if value is None:
+#         text = ""
+#     elif isinstance(value, float) and pd.isna(value):
+#         text = ""
+#     elif isinstance(value, (list, dict)):
+#         text = json.dumps(value, ensure_ascii=False, default=str)
+#     else:
+#         text = str(value)
+
+#     escaped = html_lib.escape(text)
+
+#     if len(text) <= 120:
+#         return escaped
+
+#     return f"""
+#     <div class="expandable-cell collapsed" onclick="toggleExpand(this)" title="Click to expand">
+#         {escaped}
+#     </div>
+#     """
+
+def _cell_html(value, max_len: int = 120) -> str:
     if value is None:
         text = ""
     elif isinstance(value, float) and pd.isna(value):
@@ -713,16 +727,25 @@ def _cell_html(value) -> str:
     else:
         text = str(value)
 
-    escaped = html_lib.escape(text)
+    escaped_full = html_lib.escape(text)
 
-    if len(text) <= 120:
-        return escaped
+    if len(text) <= max_len:
+        return escaped_full
 
-    return f"""
-    <div class="expandable-cell collapsed" onclick="toggleExpand(this)" title="Click to expand">
-        {escaped}
-    </div>
-    """
+    escaped_short = html_lib.escape(text[:max_len] + "…")
+
+    return (
+        f'<span class="expandable-cell" '
+        f'data-full-value="{escaped_full}" '
+        f'title="Click to expand">'
+        f"{escaped_short}"
+        f"</span>"
+    )
+
+def _col_to_class(col: str) -> str:
+    col = str(col).strip().lower()
+    col = re.sub(r"[^a-z0-9]+", "-", col)  # replace non-alphanumeric with -
+    return f"col-{col}"
 
 def _build_sortable_table(df: pd.DataFrame, table_id: str, title: str) -> str:
     if df is None or df.empty:
@@ -736,8 +759,9 @@ def _build_sortable_table(df: pd.DataFrame, table_id: str, title: str) -> str:
     df = df.round(3)
     headers = []
     for idx, col in enumerate(df.columns):
+        col_class = _col_to_class(col)
         headers.append(
-            f'<th onclick="sortHtmlTable(\'{table_id}\', {idx})">'
+            f'<th  class="{col_class}" onclick="sortHtmlTable(\'{table_id}\', {idx})">'
             f'{html_lib.escape(str(col))}<span class="sort-indicator"></span>'
             f'</th>'
         )
@@ -773,6 +797,9 @@ def download_relations(df: pd.DataFrame):
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
     df.to_csv(tmp.name, index=False)
     return tmp.name
+
+def update_node_selector(node_list):
+    return gr.update(choices=node_list)
 
 with gr.Blocks(
     title="ICDC Synthetic Data Demo"
@@ -857,27 +884,16 @@ with gr.Blocks(
     error_box = gr.HTML(value="")
 
     with gr.Row():
-        view_data_node_select = gr.Dropdown(label="Select node", choices=[], interactive=True)
+        selected_node_table = gr.Dropdown(label="Select node", choices=[], interactive=True)
         # view_data_file_select = gr.Dropdown(label="Select file", choices=[])
     
     view_data_table = gr.Dataframe(label="Selected Node data", interactive=False)
-    view_data_node_file_state = gr.State({})
+    node_data_state = gr.State({})
     node_list_state = gr.State([])
-    data_upload.change(
-        fn=get_excel_or_json_data,
-        inputs=[data_upload],
-        outputs=[
-            view_data_node_file_state,
-            view_data_node_select,
-            view_data_table,
-            node_list_state,
-            error_box
-        ],
-    )
 
-    view_data_node_select.change(
+    selected_node_table.change(
         fn=display_selected_node,
-        inputs=[view_data_node_select, view_data_node_file_state],
+        inputs=[selected_node_table, node_data_state],
         outputs=[view_data_table],
     )
 
@@ -901,12 +917,19 @@ with gr.Blocks(
     download_btn = gr.Button("Download Relations CSV")
     download_file = gr.File(label="Download file")
     rel_df_state = gr.State()
+    node_tree_state = gr.State(pd.DataFrame())
     node_tree_table = gr.Dataframe(label="Node Tree", interactive=False)
 
     load_relations_btn.click(
         fn=build_relation_schemas,
         inputs=[node_list_state],
-        outputs=[schema_markdown_1, view_relation_table, error_box, node_tree_table],
+        outputs=[
+            schema_markdown_1,
+            view_relation_table,
+            error_box,
+            node_tree_state,
+            node_tree_table
+        ],
     )
 
     download_btn.click(
@@ -914,14 +937,6 @@ with gr.Blocks(
         inputs=view_relation_table,
         outputs=download_file,
     )
-
-    # node tree
-    # gen_node_tree_btn = gr.Button("Gen Node Tree")
-    # gen_node_tree_btn.click(
-    #     fn=clusters_to_df,
-    #     inputs=paths,
-    #     outputs=node_tree_table,
-    # )
     
     # NodeSchema
     with gr.Row():
@@ -947,13 +962,15 @@ with gr.Blocks(
             html_parts.append(_build_sortable_table(display_df, table_id, str(feature_type)))
 
         return "".join(html_parts)
+    
+    
 
     run_analysis_btn.click(
         run_analysis,
         inputs=[
             schema_state, 
-            view_data_node_file_state, 
-            view_data_node_select
+            node_data_state, 
+            selected_node_table
         ],
         outputs=[
             analysis_state, 
@@ -972,20 +989,6 @@ with gr.Blocks(
     textual_analysis_table = gr.HTML()
     textual_analysis_state = gr.State(pd.DataFrame())
 
-    # textual_analyze_btn.click(
-    # fn=run_textual_analysis,
-    # inputs=[
-    #     schema_state,
-    #     view_data_node_file_state,
-    #     view_data_node_select,
-    # ],
-    # outputs=[
-    #     textual_analysis_summary,
-    #     textual_analysis_table,
-    #     textual_analysis_state,
-    # ],
-    # )
-
     # generate data
     num_rows_input = gr.Number(
         label="Number of rows to generate",
@@ -1003,19 +1006,80 @@ with gr.Blocks(
         fn=generate_data,
         inputs=[
             schema_state,
-            view_data_node_file_state,
-            view_data_node_select,
+            node_data_state,
+            selected_node_table,
             num_rows_input
         ],
         outputs=[analysis_table, generated_table, invalid_data_table, error_box],
+    )
+
+    # cross node validation
+    gr.Markdown("## Cross Node Analysis")
+    select_all_btn = gr.Button("Select All Nodes")
+    node_selector = gr.CheckboxGroup(
+        label="Select Nodes for Cross Analysis",
+        choices=[],   # ✅ must be list, not State
+    )
+    cross_btn = gr.Button("Run Cross Node Analysis")
+
+    def select_all_nodes(nodes):
+        return nodes
+
+    select_all_btn.click(
+        fn=select_all_nodes,
+        inputs=[node_list_state],
+        outputs=node_selector,
+    )
+
+    gr.Markdown("### View Node Analysis")
+    cross_node_analysis_state = gr.State({})
+    cross_node_relationship_state = gr.State({})
+    cross_node_analysis_summary = gr.Markdown()
+    feature_table = gr.Dataframe()
+    cross_node_analysis_dfs = gr.Dataframe(label="Cross Node Relation", interactive=False)
+    cross_node_analysis_html_table = gr.HTML()
+
+    cross_btn.click(
+        fn=run_cross_analysis,
+        inputs=[
+            schema_state,
+            node_data_state,
+            node_tree_state,
+            node_selector
+        ],
+        outputs=[
+            cross_node_analysis_state, 
+            cross_node_relationship_state, 
+            cross_node_analysis_summary, 
+            feature_table,
+            cross_node_analysis_dfs,
+            cross_node_analysis_html_table
+        ]
+    )
+
+    # data upload
+    data_upload.change(
+        fn=get_excel_or_json_data,
+        inputs=[data_upload],
+        outputs=[
+            node_data_state,
+            selected_node_table,
+            view_data_table,
+            node_list_state,
+            error_box
+        ],
+    ).then(
+        fn=update_node_selector,
+        inputs=node_list_state,
+        outputs=node_selector
     )
 
 
 def main() -> None:
     demo.launch(
         server_name="0.0.0.0",
-        server_port=int(os.getenv("PORT", "7860")),
-        head=AG_GRID_HEAD + f"<style>{CUSTOM_CSS}</style>",
+        server_port=int(os.getenv("PORT", "7867")),
+        head=AG_GRID_HEAD + f"<style>{CUSTOM_CSS}</style>"
     )
 if __name__ == "__main__":
     main()
