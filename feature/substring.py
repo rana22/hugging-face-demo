@@ -11,13 +11,6 @@ from .doc_alignment import DocAlignmentModel
 from schema import NodeSchema
 
 SUBSTRING_WEIGHT_PROFILES = {
-    # "default": {
-    #     "support": 0.15,
-    #     "prefix_match": 0.30,
-    #     "suffix_match": 0.30,
-    #     "substring_match": 0.20,
-    #     "doc_alignment": 0.05
-    # },
     "human_relevance": {
         "support": 0.10,
         "prefix_match": 0.02,
@@ -104,7 +97,11 @@ class SubstringFeatureAnalyzer:
     weights: dict[str, float] = field(init=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "weights", get_substring_weights(self.node_schema.name))
+        if self.node_schema is not None:
+            key = self.node_schema.name
+        else:
+            key = "cross_node_match"
+        object.__setattr__(self, "weights", get_substring_weights(key))
 
     @staticmethod
     def classify_strength(score: float) -> str:
@@ -129,7 +126,7 @@ class SubstringFeatureAnalyzer:
         prefix = prefix_match_score(pair, a, b)
         suffix = suffix_match_score(pair, a, b)
         substring = substring_match_score(pair, a, b)
-        doc_alignment = float(self.doc_model.score(a, b))
+        doc_alignment = float(self.doc_model.score(a, b)) or 0.0
 
         strength = (
             self.weights["support"] * support
@@ -155,7 +152,7 @@ class SubstringFeatureAnalyzer:
             "evidence": self._build_evidence(pair, a, b),
         }
 
-    def _build_evidence(self, pair: pd.DataFrame, a: str, b: str, limit: int = 5) -> list[dict[str, Any]]:
+    def _build_evidence(self, pair: pd.DataFrame, a: str, b: str, limit: int = 20) -> list[dict[str, Any]]:
         if pair.empty:
             return []
 

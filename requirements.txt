@@ -28,3 +28,4 @@ sentence-transformers
 torch
 fastapi
 uvicorn
+rapidfuzz>=3.9.0   

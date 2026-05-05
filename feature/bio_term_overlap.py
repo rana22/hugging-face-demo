@@ -6,12 +6,13 @@ from typing import Any, Dict, List, Set
 import numpy as np
 import pandas as pd
 import re
+import requests
+import os
 
 from .categorical import normalize_value, prepare_pair_frame
 from .doc_alignment import DocAlignmentModel
 from schema import NodeSchema
 from sentence_transformers import SentenceTransformer
-
 
 # -----------------------------
 # BIO TERM WEIGHT PROFILES
@@ -34,101 +35,56 @@ def get_bioterm_weights(node_name: str) -> dict[str, float] | None:
     key = (node_name or "").lower()
     return BIOTERM_WEIGHT_PROFILES.get(key)
 
-_model = SentenceTransformer("all-MiniLM-L6-v2")
-# -----------------------------
-# BIO TERM EXTRACTION
-# -----------------------------
-BIO_TERM_PATTERN = re.compile(r"[A-Za-z0-9\-]+")
+NLP_URL = os.getenv("NLP_URL", "http://localhost:8000")
 
+def call_bio_dataset_service(node_schema: NodeSchema, df: pd.DataFrame) -> list[dict]:
+    try:
+        if df.empty:
+            return []
 
-def extract_bio_terms(text: str) -> Set[str]:
-    if not text:
-        return set()
+        df_sample = df.sample(min(len(df), 100), random_state=42)
 
-    tokens = BIO_TERM_PATTERN.findall(text.lower())
+        # 🔥 Extract schema-level text
+        property_meta = {}
+        for prop, spec in node_schema.properties.items():
+            property_meta[prop] = {
+                "description": spec.get("Desc", ""),
+                "type": spec.get("Type", ""),
+                "tags": spec.get("Tags", {}),
+            }
 
-    # filter noise
-    return {t for t in tokens if len(t) > 2}
+        payload = {
+            "node": node_schema.name,
+            "node_description": node_schema.description or "",
+            "properties": list(df_sample.columns),
+            "property_metadata": property_meta,   # ✅ NEW
+            "data": df_sample.astype(str).to_dict("records"),
+        }
 
+        resp = requests.post(
+            f"{NLP_URL}/bio-analyze-dataset",
+            json=payload,
+            timeout=10,
+        )
 
-# -----------------------------
-# ROW-LEVEL OVERLAP
-# -----------------------------
-# def bio_term_overlap_row(av: str, bv: str) -> float:
-#     terms_a = extract_bio_terms(av)
-#     terms_b = extract_bio_terms(bv)
+        if resp.status_code != 200:
+            return []
 
-#     if not terms_a or not terms_b:
-#         return 0.0
+        return resp.json().get("property_relations", [])
 
-#     intersection = terms_a & terms_b
-#     union = terms_a | terms_b
-
-#     return len(intersection) / len(union)
-
-def bio_term_embedding(text: str) -> np.ndarray:
-    terms = extract_bio_terms(text)
-    if not terms:
-        return np.zeros(384)  # model dim
-
-    # join terms into a compact representation
-    term_string = " ".join(sorted(terms))
-    return _model.encode(term_string)
-
-def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
-    if np.linalg.norm(a) == 0 or np.linalg.norm(b) == 0:
-        return 0.0
-    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
-
-# -----------------------------
-# DATAFRAME-LEVEL SCORE
-# -----------------------------
-# def bio_term_overlap_score(df: pd.DataFrame, a: str, b: str) -> float:
-#     total = 0
-#     score = 0.0
-
-#     for _, row in df.iterrows():
-#         av = normalize_value(row.get(a, ""))
-#         bv = normalize_value(row.get(b, ""))
-
-#         if not av or not bv:
-#             continue
-
-#         total += 1
-#         score += bio_term_overlap_row(av, bv)
-
-#     return score / total if total else 0.0
-
-def bio_term_vector_score(df: pd.DataFrame, a: str, b: str) -> float:
-    total = 0
-    score = 0.0
-
-    for _, row in df.iterrows():
-        av = normalize_value(row.get(a, ""))
-        bv = normalize_value(row.get(b, ""))
-
-        if not av or not bv:
-            continue
-
-        emb_a = bio_term_embedding(av)
-        emb_b = bio_term_embedding(bv)
-
-        total += 1
-        score += cosine_sim(emb_a, emb_b)
-
-    return score / total if total else 0.0
-
+    except Exception as e:
+        print(f"[BIO SERVICE ERROR] {e}")
+        return []
 
 @dataclass
 class BioTermFeatureAnalyzer:
     node_schema: NodeSchema
+    doc_model: DocAlignmentModel
     weights: dict[str, float] = field(init=False)
+    _bio_cache: Dict[tuple, float] | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "weights", {
-            "support": 0.10,
-            "bio_vector_similarity": 0.90,
-        })
+        object.__setattr__(self, "weights", get_bioterm_weights(self.node_schema.name))
 
     @staticmethod
     def classify_strength(score: float) -> str:
@@ -142,119 +98,92 @@ class BioTermFeatureAnalyzer:
             return "weak"
         return "independent"
 
+    # -----------------------------
+    # Load dataset-level bio scores
+    # -----------------------------
+    def _ensure_cache(self, df: pd.DataFrame):
+        if self.weights is None:
+            return
+
+        if self._bio_cache is not None:
+            return
+
+        results = call_bio_dataset_service(self.node_schema.name, df)
+
+        cache: Dict[tuple, float] = {}
+        for item in results:
+            a = item.get("A")
+            b = item.get("B")
+            score = float(item.get("bio_overlap", 0.0))
+
+            if a and b:
+                cache[(a, b)] = score
+                cache[(b, a)] = score  # symmetry
+
+        self._bio_cache = cache
+
+    # -----------------------------
+    # Main analyzer
+    # -----------------------------
     def analyze(self, df: pd.DataFrame, a: str, b: str) -> dict[str, Any]:
+        if self.weights is None:
+            return None
 
         pair = prepare_pair_frame(df, a, b)
-
         total_rows = len(df)
         row_count = len(pair)
+
         support = float(row_count / total_rows) if total_rows else 0.0
 
-        vector_score = bio_term_vector_score(pair, a, b)
+        # ensure cache once
+        self._ensure_cache(df)
+
+        bio_score = 0.0
+        if self._bio_cache:
+            bio_score = self._bio_cache.get((a, b), 0.0)
+
+        doc_alignment = float(self.doc_model.score(a, b))
 
         strength = (
             self.weights["support"] * support
-            + self.weights["bio_vector_similarity"] * vector_score
+            + self.weights["bio_term_overlap"] * bio_score
+            + self.weights["doc_alignment"] * doc_alignment
         )
 
         return {
             "A": a,
             "B": b,
-            "feature_type": "bio_term_vector",
+            "feature_type": "bio_term",
             "support": support,
-            "bio_vector_similarity": vector_score,
+            "bio_term_overlap": bio_score,
+            "doc_alignment": doc_alignment,
             "strength": float(np.clip(strength, 0.0, 1.0)),
             "classification": self.classify_strength(strength),
             "row_count": row_count,
             "total_rows": total_rows,
+            "evidence": self._build_evidence(pair, a, b),
         }
 
-# -----------------------------
-# ANALYZER
-# -----------------------------
-# @dataclass
-# class BioTermFeatureAnalyzer:
-#     node_schema: NodeSchema
-#     doc_model: DocAlignmentModel
-#     weights: dict[str, float] = field(init=False)
-
-#     def __post_init__(self) -> None:
-#         object.__setattr__(self, "weights", get_bioterm_weights(self.node_schema.name))
-
-    # @staticmethod
-    # def classify_strength(score: float) -> str:
-    #     if score >= 0.9:
-    #         return "functional"
-    #     if score >= 0.7:
-    #         return "strong"
-    #     if score >= 0.45:
-    #         return "conditional"
-    #     if score >= 0.2:
-    #         return "weak"
-    #     return "independent"
-
-    # def analyze(self, df: pd.DataFrame, a: str, b: str) -> dict[str, Any] | None:
-    #     if self.weights is None:
-    #         return None
-
-    #     pair = prepare_pair_frame(df, a, b)
-
-    #     total_rows = len(df)
-    #     row_count = len(pair)
-
-    #     support = float(row_count / total_rows) if total_rows else 0.0
-
-    #     bio_overlap = bio_term_overlap_score(pair, a, b)
-    #     doc_alignment = float(self.doc_model.score(a, b))
-
-    #     strength = (
-    #         self.weights["support"] * support
-    #         + self.weights["bio_term_overlap"] * bio_overlap
-    #         + self.weights["doc_alignment"] * doc_alignment
-    #     )
-
-    #     return {
-    #         "A": a,
-    #         "B": b,
-    #         "feature_type": "bio_term",
-    #         "support": support,
-    #         "bio_term_overlap": bio_overlap,
-    #         "doc_alignment": doc_alignment,
-    #         "strength": float(np.clip(strength, 0.0, 1.0)),
-    #         "classification": self.classify_strength(strength),
-    #         "row_count": row_count,
-    #         "total_rows": total_rows,
-    #         "evidence": self._build_evidence(pair, a, b),
-    #     }
-
     # -----------------------------
-    # EVIDENCE
+    # Evidence (same style as substring)
     # -----------------------------
     def _build_evidence(
-        self, pair: pd.DataFrame, a: str, b: str, limit: int = 5
-    ) -> List[Dict[str, Any]]:
+        self,
+        pair: pd.DataFrame,
+        a: str,
+        b: str,
+        limit: int = 5
+    ) -> list[dict[str, Any]]:
         if pair.empty:
             return []
 
-        evidence: List[Dict[str, Any]] = []
-
+        evidence = []
         for _, row in pair.head(limit).iterrows():
-            av = str(row[a])
-            bv = str(row[b])
-
-            terms_a = extract_bio_terms(av)
-            terms_b = extract_bio_terms(bv)
-            overlap = terms_a & terms_b
-
-            evidence.append(
-                {
-                    "A_value": av,
-                    "B_value": bv,
-                    "A_terms": list(terms_a)[:10],
-                    "B_terms": list(terms_b)[:10],
-                    "overlap_terms": list(overlap)[:10],
-                    "overlap_count": len(overlap),
-                }
-            )
+            evidence.append({
+                "A_value": str(row[a]),
+                "B_value": str(row[b]),
+                "bio_score": self._bio_cache.get((a, b), 0.0) if self._bio_cache else 0.0
+            })
 
         return evidence
+
